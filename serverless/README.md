@@ -1,41 +1,41 @@
 # RunPod Serverless LoRA Training
 
-RunPod Serverless 환경에서 LoRA (Low-Rank Adaptation) 모델을 훈련하는 비동기 핸들러입니다.
+Async handler for training LoRA (Low-Rank Adaptation) models in RunPod Serverless environment.
 
-## 특징
+## Features
 
-- **비동기 실행**: 긴 훈련 작업을 위한 async 핸들러
-- **전체 커스터마이징**: 모든 TOML 파라미터를 JSON으로 제어
-- **자동 캡셔닝**: JoyCaption (이미지) + Gemini API (비디오)
-- **모델 캐싱**: `/runpod-volume`에 모델 저장하여 재사용
-- **Retry 로직**: 네트워크 오류 시 3회 재시도
-- **URL 입력**: 이미지/비디오를 URL로 다운로드
-- **Pre-signed URL 출력**: `rp upload`로 결과 업로드
+- **Async Execution**: Async handler for long-running training jobs
+- **Full Customization**: Control all TOML parameters via JSON
+- **Automatic Captioning**: JoyCaption (images) + Gemini API (videos)
+- **Model Caching**: Save and reuse models in `/runpod-volume`
+- **Retry Logic**: 3 retries on network errors
+- **URL Inputs**: Download images/videos from URLs
+- **Pre-signed URL Outputs**: Upload results via `rp upload`
 
-## 지원 모델
+## Supported Models
 
-- **Flux** (black-forest-labs/FLUX.1-dev) - HF Token 필요
+- **Flux** (black-forest-labs/FLUX.1-dev) - Requires HF Token
 - **SDXL** (Stable Diffusion XL)
 - **Wan 1.3B** (Text-to-Video)
 - **Wan 14B T2V** (Text-to-Video 14B)
 - **Wan 14B I2V** (Image-to-Video 14B)
 - **Qwen Image**
 
-## 아키텍처
+## Architecture
 
 ```
-handler.py (진입점)
+handler.py (entry point)
     ↓
-├── config.py (설정 검증)
-├── downloader.py (모델 + 데이터셋 다운로드)
+├── config.py (configuration validation)
+├── downloader.py (model + dataset downloads)
 ├── caption_manager.py (JoyCaption + Gemini)
-├── training_manager.py (TOML 생성 + DeepSpeed 실행)
+├── training_manager.py (TOML generation + DeepSpeed execution)
 └── utils.py (Retry, CUDA, Upload)
 ```
 
-## 배포 방법
+## Deployment
 
-### 1. Docker 이미지 빌드
+### 1. Build Docker Image
 
 ```bash
 cd /Users/ghyeok/Desktop/runpod-diffusion_pipe
@@ -43,26 +43,26 @@ docker build -f Dockerfile.serverless -t your-registry/runpod-lora-training:late
 docker push your-registry/runpod-lora-training:latest
 ```
 
-### 2. RunPod Serverless 생성
+### 2. Create RunPod Serverless Endpoint
 
-RunPod 웹사이트에서:
+On the RunPod website:
 
-1. **Serverless** → **New Endpoint** 클릭
+1. **Serverless** → **New Endpoint**
 2. **Container Image**: `your-registry/runpod-lora-training:latest`
-3. **GPU Type**: H100 또는 H200 권장
-4. **Min Workers**: 0 (cold start 허용)
-5. **Max Workers**: 필요한 동시 작업 수
-6. **Timeout**: 24시간 (긴 훈련용)
-7. **Network Volume**: 생성 및 마운트 (`/runpod-volume`)
+3. **GPU Type**: H100 or H200 recommended
+4. **Min Workers**: 0 (allow cold starts)
+5. **Max Workers**: Number of concurrent jobs needed
+6. **Timeout**: 24 hours (for long training)
+7. **Network Volume**: Create and mount (`/runpod-volume`)
 
-### 3. API 호출
+### 3. API Call
 
 ```python
 import runpod
 
 runpod.api_key = "YOUR_RUNPOD_API_KEY"
 
-# Job 생성
+# Create job
 job = runpod.Endpoint("ENDPOINT_ID").run({
     "input": {
         "model_type": "flux",
@@ -82,16 +82,16 @@ job = runpod.Endpoint("ENDPOINT_ID").run({
     }
 })
 
-# Job 상태 확인
+# Check job status
 status = runpod.Endpoint("ENDPOINT_ID").status(job["id"])
 print(status)
 
-# 결과 가져오기
+# Get result
 result = runpod.Endpoint("ENDPOINT_ID").result(job["id"])
 print(result["output"]["download_urls"])
 ```
 
-## 입력 스키마
+## Input Schema
 
 ```json
 {
@@ -128,25 +128,25 @@ print(result["output"]["download_urls"])
 }
 ```
 
-### 필수 필드
+### Required Fields
 
-- `model_type`: 훈련할 모델 타입
-- `image_urls` 또는 `video_urls`: 최소 하나 이상
+- `model_type`: Model type to train
+- `image_urls` or `video_urls`: At least one required
 
-### 조건부 필수 필드
+### Conditionally Required Fields
 
-- `hf_token`: Flux 모델 사용 시 필수
-- `gemini_api_key`: 비디오 캡셔닝 사용 시 필수
+- `hf_token`: Required when using Flux model
+- `gemini_api_key`: Required when using video captioning
 
-### 선택 필드
+### Optional Fields
 
-- `caption_mode`: 기본값 `"skip"`
-- `trigger_word`: 이미지 캡션 앞에 추가할 단어
-- `training_params`: 기본값으로 채워짐 (일부만 override 가능)
+- `caption_mode`: Default `"skip"`
+- `trigger_word`: Word to prepend to image captions
+- `training_params`: Filled with defaults (can override partially)
 
-## 출력 스키마
+## Output Schema
 
-### 성공 시
+### On Success
 
 ```json
 {
@@ -176,7 +176,7 @@ print(result["output"]["download_urls"])
 }
 ```
 
-### 실패 시
+### On Failure
 
 ```json
 {
@@ -187,13 +187,13 @@ print(result["output"]["download_urls"])
 }
 ```
 
-## 로컬 테스트
+## Local Testing
 
 ```bash
-# 환경 변수 설정
+# Set environment variables
 export CUDA_VISIBLE_DEVICES=0
 
-# 테스트 job 생성
+# Create test job
 cat > test_job.json << 'EOF'
 {
   "id": "test-job-001",
@@ -212,7 +212,7 @@ cat > test_job.json << 'EOF'
 }
 EOF
 
-# 핸들러 실행
+# Run handler
 cd /Users/ghyeok/Desktop/runpod-diffusion_pipe/serverless
 python -c "
 import json
@@ -226,62 +226,64 @@ print(json.dumps(result, indent=2))
 "
 ```
 
-## 비용 최적화
+## Cost Optimization
 
-### 1. 모델 캐싱
+### 1. Model Caching
 
-모델을 Network Volume에 미리 다운로드:
+Pre-download models to Network Volume:
 
 ```bash
-# RunPod Pod에서 실행
+# Run on RunPod Pod
 huggingface-cli download black-forest-labs/FLUX.1-dev \
   --local-dir /runpod-volume/models/flux \
   --token YOUR_HF_TOKEN
 ```
 
-이후 serverless job에서는 다운로드 없이 캐시 사용.
+Subsequent serverless jobs will use cache without downloading.
 
-### 2. Cold Start 최소화
+### 2. Minimize Cold Starts
 
-- **Min Workers**: 1로 설정하여 warm worker 유지 (비용 증가)
-- **Network Volume**: 모델 캐시로 초기화 시간 단축
+- **Min Workers**: Set to 1 to maintain warm worker (increases cost)
+- **Network Volume**: Reduce initialization time with model cache
 
-### 3. GPU 선택
+### 3. GPU Selection
 
-- **개발/테스트**: RTX A6000 (저렴)
-- **프로덕션**: H100 (빠름, CUDA 12.8 완벽 지원)
+- **Development/Testing**: RTX A6000 (cheaper)
+- **Production**: H100 (faster, full CUDA 12.8 support)
 
-## 문제 해결
+## Troubleshooting
 
-### CUDA 오류
+### CUDA Error
 
 ```
 RuntimeError: CUDA not available
 ```
 
-**해결**: RunPod 배포 시 CUDA 12.8 GPU 선택
+**Solution**: Select CUDA 12.8 GPU when deploying on RunPod
 
-### 모델 다운로드 실패
+### Model Download Failure
 
 ```
 RuntimeError: Failed to download model
 ```
 
-**해결**:
-1. HF Token 확인 (Flux의 경우)
-2. Network Volume 용량 확인
-3. RunPod 네트워크 상태 확인
+**Solution**:
 
-### 훈련 실패
+1. Verify HF Token (for Flux)
+2. Check Network Volume capacity
+3. Check RunPod network status
+
+### Training Failure
 
 ```
 RuntimeError: Training failed
 ```
 
-**해결**:
-1. 로그 확인: `result["traceback"]`
-2. GPU 메모리 부족 시: `micro_batch_size_per_gpu` 감소
-3. TOML 파라미터 검증
+**Solution**:
+
+1. Check logs: `result["traceback"]`
+2. If GPU out of memory: Reduce `micro_batch_size_per_gpu`
+3. Validate TOML parameters
 
 ### Timeout
 
@@ -289,16 +291,17 @@ RuntimeError: Training failed
 asyncio.TimeoutError: Command timed out
 ```
 
-**해결**:
-1. RunPod Endpoint timeout 증가 (24시간)
-2. Epochs 수 감소
-3. 데이터셋 크기 확인
+**Solution**:
 
-## 개발 가이드
+1. Increase RunPod Endpoint timeout (24 hours)
+2. Reduce number of epochs
+3. Check dataset size
 
-### 새 모델 추가
+## Development Guide
 
-1. [config.py](config.py:21:0-52:1)의 `MODEL_CONFIGS`에 추가:
+### Adding a New Model
+
+1. Add to `MODEL_CONFIGS` in [config.py](config.py):
 
 ```python
 "new_model": {
@@ -309,11 +312,11 @@ asyncio.TimeoutError: Command timed out
 }
 ```
 
-2. `/toml_files/new_model.toml` 생성
+2. Create `/toml_files/new_model.toml`
 
-3. 테스트
+3. Test
 
-### 로깅 추가
+### Adding Logging
 
 ```python
 import logging
@@ -324,26 +327,26 @@ logger.warning("Warning message")
 logger.error("Error message")
 ```
 
-### Retry 로직 추가
+### Adding Retry Logic
 
 ```python
 from utils import retry
 
 @retry(max_attempts=3, backoff=2.0)
 async def my_function():
-    # 실패 시 3회 재시도 (2^n초 대기)
+    # Retries 3 times on failure (waits 2^n seconds)
     pass
 ```
 
-## 라이센스
+## License
 
-이 프로젝트는 원본 [diffusion-pipe](https://github.com/tdrussell/diffusion-pipe) 라이센스를 따릅니다.
+This project follows the original [diffusion-pipe](https://github.com/tdrussell/diffusion-pipe) license.
 
-## 기여
+## Contributing
 
-Issues와 Pull Requests 환영합니다!
+Issues and Pull Requests are welcome!
 
-## 참고 문서
+## References
 
 - [RunPod Serverless Docs](https://docs.runpod.io/serverless/workers/handler-functions)
 - [Diffusion Pipe](https://github.com/tdrussell/diffusion-pipe)
