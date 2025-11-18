@@ -19,37 +19,37 @@ MODEL_CONFIGS = {
         "repo": "black-forest-labs/FLUX.1-dev",
         "requires_hf_token": True,
         "toml_file": "flux.toml",
-        "path_in_volume": "models/flux"
+        "path_in_volume": "flux"
     },
     "sdxl": {
         "repo": "timoshishi/sdXL_v10VAEFix",
         "requires_hf_token": False,
         "toml_file": "sdxl.toml",
-        "path_in_volume": "models/sdXL_v10VAEFix.safetensors"
+        "path_in_volume": "sdXL_v10VAEFix.safetensors"
     },
     "wan13": {
         "repo": "Wan-AI/Wan2.1-T2V-1.3B",
         "requires_hf_token": False,
         "toml_file": "wan13_video.toml",
-        "path_in_volume": "models/Wan/Wan2.1-T2V-1.3B"
+        "path_in_volume": "Wan/Wan2.1-T2V-1.3B"
     },
     "wan14b_t2v": {
         "repo": "Wan-AI/Wan2.1-T2V-14B",
         "requires_hf_token": False,
         "toml_file": "wan14b_t2v.toml",
-        "path_in_volume": "models/Wan/Wan2.1-T2V-14B"
+        "path_in_volume": "Wan/Wan2.1-T2V-14B"
     },
     "wan14b_i2v": {
         "repo": "Wan-AI/Wan2.1-I2V-14B-480P",
         "requires_hf_token": False,
         "toml_file": "wan14b_i2v.toml",
-        "path_in_volume": "models/Wan/Wan2.1-I2V-14B-480P"
+        "path_in_volume": "Wan/Wan2.1-I2V-14B-480P"
     },
     "qwen": {
         "repo": "Qwen/Qwen-Image",
         "requires_hf_token": False,
         "toml_file": "qwen_toml.toml",
-        "path_in_volume": "models/Qwen-Image"
+        "path_in_volume": "Qwen-Image"
     }
 }
 
