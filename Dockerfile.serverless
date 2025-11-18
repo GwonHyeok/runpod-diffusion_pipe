@@ -1,0 +1,55 @@
+# RunPod Serverless Dockerfile for LoRA Training
+# Based on existing Dockerfile but optimized for serverless deployment
+
+FROM nvidia/cuda:12.8.1-cudnn-devel-ubuntu22.04 AS base
+
+# Environment variables
+ENV DEBIAN_FRONTEND=noninteractive \
+    PIP_PREFER_BINARY=1 \
+    PYTHONUNBUFFERED=1 \
+    CMAKE_BUILD_PARALLEL_LEVEL=8 \
+    NETWORK_VOLUME=/runpod-volume
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    python3.10 python3-pip curl zip git git-lfs wget vim libgl1 libglib2.0-0 \
+    python3-dev build-essential gcc \
+    && ln -sf /usr/bin/python3.10 /usr/bin/python \
+    && ln -sf /usr/bin/pip3 /usr/bin/pip \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Python base packages
+RUN pip install --no-cache-dir \
+    huggingface_hub[cli] \
+    jupyter jupyter-server jupyter-server-terminals
+
+# Create final image
+FROM base AS final
+
+# Install PyTorch nightly with CUDA 12.8
+RUN pip install --pre torch torchvision torchaudio --index-url https://download.pytorch.org/whl/nightly/cu128
+
+# Clone diffusion-pipe repository
+RUN git clone --recurse-submodules https://github.com/tdrussell/diffusion-pipe /diffusion_pipe
+
+# Install requirements (excluding flash-attn)
+RUN grep -v -i "flash-attn\|flash-attention" /diffusion_pipe/requirements.txt > /tmp/requirements_no_flash.txt && \
+    pip install -r /tmp/requirements_no_flash.txt
+
+# Copy the entire codebase
+COPY . /workspace
+
+# Install serverless dependencies
+RUN pip install --no-cache-dir -r /workspace/serverless/requirements.txt
+
+# Set working directory to serverless handler
+WORKDIR /workspace/serverless
+
+# Create necessary directories
+RUN mkdir -p /runpod-volume/models \
+    && mkdir -p /tmp/datasets \
+    && mkdir -p /workspace/logs
+
+# Expose handler
+CMD ["python", "-u", "handler.py"]

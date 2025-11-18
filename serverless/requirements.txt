@@ -1,0 +1,21 @@
+# RunPod Serverless LoRA Training - Python Dependencies
+
+# RunPod SDK
+runpod>=1.6.0
+
+# Async HTTP client
+aiohttp>=3.9.0
+
+# Configuration
+toml>=0.10.2
+
+# Existing dependencies (inherited from main project)
+# These should already be in the base image from Dockerfile
+# torch>=2.7.0  # Installed via Dockerfile
+# transformers>=4.30.0  # Installed via Dockerfile
+# peft>=0.17.0  # Updated during runtime
+# deepspeed>=0.14.0  # For distributed training
+# huggingface_hub[cli]>=0.20.0  # For model downloads
+
+# Note: Most heavy dependencies are pre-installed in the Docker image
+# This file lists only the serverless-specific additions
