@@ -16,7 +16,9 @@ import torch
 logger = logging.getLogger(__name__)
 
 
-def retry(max_attempts: int = 3, backoff: float = 2.0, exceptions: tuple = (Exception,)):
+def retry(
+    max_attempts: int = 3, backoff: float = 2.0, exceptions: tuple = (Exception,)
+):
     """
     Retry decorator with exponential backoff
 
@@ -30,6 +32,7 @@ def retry(max_attempts: int = 3, backoff: float = 2.0, exceptions: tuple = (Exce
         async def download_file(url):
             ...
     """
+
     def decorator(func):
         @wraps(func)
         async def async_wrapper(*args, **kwargs):
@@ -40,9 +43,11 @@ def retry(max_attempts: int = 3, backoff: float = 2.0, exceptions: tuple = (Exce
                 except exceptions as e:
                     last_exception = e
                     if attempt == max_attempts - 1:
-                        logger.error(f"{func.__name__} failed after {max_attempts} attempts: {e}")
+                        logger.error(
+                            f"{func.__name__} failed after {max_attempts} attempts: {e}"
+                        )
                         raise
-                    wait_time = backoff ** attempt
+                    wait_time = backoff**attempt
                     logger.warning(
                         f"{func.__name__} attempt {attempt + 1}/{max_attempts} failed: {e}. "
                         f"Retrying in {wait_time:.1f}s..."
@@ -59,9 +64,11 @@ def retry(max_attempts: int = 3, backoff: float = 2.0, exceptions: tuple = (Exce
                 except exceptions as e:
                     last_exception = e
                     if attempt == max_attempts - 1:
-                        logger.error(f"{func.__name__} failed after {max_attempts} attempts: {e}")
+                        logger.error(
+                            f"{func.__name__} failed after {max_attempts} attempts: {e}"
+                        )
                         raise
-                    wait_time = backoff ** attempt
+                    wait_time = backoff**attempt
                     logger.warning(
                         f"{func.__name__} attempt {attempt + 1}/{max_attempts} failed: {e}. "
                         f"Retrying in {wait_time:.1f}s..."
@@ -101,7 +108,7 @@ def validate_cuda():
     # Test kernel compatibility (similar to interactive_start_training.sh line 334-341)
     try:
         # Simple GPU operation to verify kernel compatibility
-        x = torch.randn(100, 100, device='cuda')
+        x = torch.randn(100, 100, device="cuda")
         y = x * 2
         result = y.sum().item()
         del x, y
@@ -130,7 +137,7 @@ async def run_subprocess(
     env: Optional[Dict[str, str]] = None,
     cwd: Optional[Path] = None,
     timeout: Optional[int] = None,
-    log_output: bool = True
+    log_output: bool = True,
 ) -> subprocess.CompletedProcess:
     """
     Run subprocess asynchronously with proper error handling
@@ -167,17 +174,14 @@ async def run_subprocess(
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             env=full_env,
-            cwd=str(cwd) if cwd else None
+            cwd=str(cwd) if cwd else None,
         )
 
         # Wait for process with optional timeout
-        stdout, stderr = await asyncio.wait_for(
-            process.communicate(),
-            timeout=timeout
-        )
+        stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=timeout)
 
-        stdout_str = stdout.decode('utf-8', errors='replace')
-        stderr_str = stderr.decode('utf-8', errors='replace')
+        stdout_str = stdout.decode("utf-8", errors="replace")
+        stderr_str = stderr.decode("utf-8", errors="replace")
 
         if log_output:
             if stdout_str:
@@ -187,17 +191,11 @@ async def run_subprocess(
 
         if process.returncode != 0:
             raise subprocess.CalledProcessError(
-                process.returncode,
-                cmd,
-                output=stdout_str,
-                stderr=stderr_str
+                process.returncode, cmd, output=stdout_str, stderr=stderr_str
             )
 
         return subprocess.CompletedProcess(
-            cmd,
-            process.returncode,
-            stdout_str,
-            stderr_str
+            cmd, process.returncode, stdout_str, stderr_str
         )
 
     except asyncio.TimeoutError:
@@ -220,34 +218,47 @@ async def run_subprocess(
 
 
 async def upload_results(
-    output_dir: Path,
-    job_id: str,
-    file_patterns: List[str] = None
+    output_dir: Path, job_id: str, file_patterns: Optional[List[str]] = None
 ) -> List[str]:
     """
-    Upload training results to RunPod using rp CLI
+    Upload training results using configured storage backend (GCP or RunPod)
+
+    Storage backend is determined by environment variables:
+    - If GCP_SERVICE_ACCOUNT_JSON and GCS_BUCKET_NAME are set, uses GCP Storage
+    - Otherwise, falls back to RunPod's rp_upload utility
 
     Args:
         output_dir: Directory containing training outputs
-        job_id: RunPod job ID for organizing uploads
+        job_id: Job ID for organizing uploads
         file_patterns: List of glob patterns to match (default: ["*.safetensors", "*.log"])
 
     Returns:
-        List of pre-signed URLs for uploaded files
+        List of accessible URLs for uploaded files (signed URLs with 7-day expiration for GCP)
 
-    Note:
-        Uses the 'rp upload' command which should be available in the RunPod environment
-        Falls back to manual file listing if rp CLI is not available
+    Raises:
+        RuntimeError: If upload fails after retries
     """
+    # Import uploader factory
+    from uploaders import create_uploader
+
     if file_patterns is None:
         file_patterns = ["**/*.safetensors", "**/*.log", "**/checkpoint-*"]
 
     logger.info(f"Uploading results from {output_dir}")
 
+    # Validate output directory exists
+    if not output_dir.exists():
+        raise RuntimeError(f"Output directory does not exist: {output_dir}")
+    if not output_dir.is_dir():
+        raise RuntimeError(f"Output path is not a directory: {output_dir}")
+
     # Collect files to upload
     files_to_upload = []
     for pattern in file_patterns:
         files_to_upload.extend(output_dir.glob(pattern))
+
+    # Filter out directories
+    files_to_upload = [f for f in files_to_upload if f.is_file()]
 
     if not files_to_upload:
         logger.warning(f"No files found to upload in {output_dir}")
@@ -255,39 +266,14 @@ async def upload_results(
 
     logger.info(f"Found {len(files_to_upload)} files to upload")
 
-    # Try using rp CLI for upload
+    # Create appropriate uploader based on environment
+    uploader = create_uploader(job_id)
+
+    # Upload files and return URLs
     try:
-        upload_urls = []
-
-        for file_path in files_to_upload:
-            if not file_path.is_file():
-                continue
-
-            relative_path = file_path.relative_to(output_dir)
-            logger.info(f"Uploading {relative_path} ({file_path.stat().st_size / 1024**2:.1f} MB)")
-
-            # Use rp upload command
-            result = await run_subprocess(
-                ["rp", "upload", str(file_path)],
-                log_output=False
-            )
-
-            # Parse URL from output
-            # Expected output format: "Uploaded to: https://..."
-            for line in result.stdout.split('\n'):
-                if 'http' in line:
-                    url = line.strip().split()[-1]
-                    upload_urls.append(url)
-                    logger.info(f"Uploaded: {url}")
-                    break
-
+        upload_urls = await uploader.upload(files_to_upload, job_id)
+        logger.info(f"Upload complete: {len(upload_urls)} files uploaded")
         return upload_urls
-
-    except FileNotFoundError:
-        logger.warning("rp CLI not found, falling back to file listing")
-        # If rp CLI is not available, return local paths
-        # In production, you might want to integrate with S3 or another storage solution
-        return [str(f) for f in files_to_upload if f.is_file()]
 
     except Exception as e:
         logger.error(f"Upload failed: {e}")
@@ -303,8 +289,8 @@ def setup_logging(level: str = "INFO"):
     """
     logging.basicConfig(
         level=getattr(logging, level),
-        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-        datefmt='%Y-%m-%d %H:%M:%S'
+        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
     )
 
 
@@ -318,34 +304,29 @@ def parse_training_metrics(log_output: str) -> Dict[str, Any]:
     Returns:
         Dictionary containing parsed metrics (loss, epoch, steps, etc.)
     """
-    metrics = {
-        "final_loss": None,
-        "epochs_completed": 0,
-        "total_steps": 0
-    }
+    metrics = {"final_loss": None, "epochs_completed": 0, "total_steps": 0}
 
     # Parse common patterns from training logs
-    lines = log_output.split('\n')
+    lines = log_output.split("\n")
     for line in lines:
         # Look for epoch completion
-        if 'epoch' in line.lower() and '/' in line:
+        if "epoch" in line.lower() and "/" in line:
             try:
                 # Example: "Epoch 50/80"
-                parts = line.split('/')
+                parts = line.split("/")
                 if len(parts) >= 2:
                     metrics["epochs_completed"] = max(
-                        metrics["epochs_completed"],
-                        int(parts[0].split()[-1])
+                        metrics["epochs_completed"], int(parts[0].split()[-1])
                     )
             except (ValueError, IndexError):
                 pass
 
         # Look for loss values
-        if 'loss' in line.lower():
+        if "loss" in line.lower():
             try:
                 # Example: "loss: 0.0234"
                 for part in line.split():
-                    if part.replace('.', '').replace('-', '').isdigit():
+                    if part.replace(".", "").replace("-", "").isdigit():
                         loss_val = float(part)
                         if 0 < loss_val < 10:  # Reasonable loss range
                             metrics["final_loss"] = loss_val
@@ -363,5 +344,5 @@ __all__ = [
     "run_subprocess",
     "upload_results",
     "setup_logging",
-    "parse_training_metrics"
+    "parse_training_metrics",
 ]

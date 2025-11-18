@@ -9,6 +9,9 @@ aiohttp>=3.9.0
 # Configuration
 toml>=0.10.2
 
+# Google Cloud Storage (for optional GCP upload)
+google-cloud-storage==3.6.0
+
 # Existing dependencies (inherited from main project)
 # These should already be in the base image from Dockerfile
 # torch>=2.7.0  # Installed via Dockerfile

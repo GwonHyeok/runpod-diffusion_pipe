@@ -54,6 +54,12 @@ On the RunPod website:
 5. **Max Workers**: Number of concurrent jobs needed
 6. **Timeout**: 24 hours (for long training)
 7. **Network Volume**: Create and mount (`/runpod-volume`)
+8. **Environment Variables** (Optional - for GCP Storage):
+
+   - `GCP_SERVICE_ACCOUNT_JSON`: Service account JSON credentials (as string)
+   - `GCS_BUCKET_NAME`: GCS bucket name for storing trained models
+
+   If these are not set, the system falls back to RunPod's native `rp_upload` utility.
 
 ### 3. API Call
 
@@ -250,6 +256,119 @@ Subsequent serverless jobs will use cache without downloading.
 
 - **Development/Testing**: RTX A6000 (cheaper)
 - **Production**: H100 (faster, full CUDA 12.8 support)
+
+## Storage Configuration
+
+This serverless handler supports two storage backends for uploading trained LoRA models:
+
+### Option 1: Google Cloud Storage (Recommended for Production)
+
+**Benefits:**
+
+- Longer URL expiration (7 days vs 24-48 hours for RunPod)
+- More control over storage lifecycle
+- Better for multi-cloud deployments
+- Parallel uploads (faster for multiple checkpoints)
+
+**Setup:**
+
+1. **Create GCS Bucket:**
+
+   ```bash
+   gsutil mb -l us-central1 gs://your-lora-models-bucket
+   ```
+
+2. **Create Service Account:**
+
+   ```bash
+   gcloud iam service-accounts create lora-uploader \
+     --display-name="LoRA Training Uploader"
+
+   # Grant Storage Object Creator permission
+   gsutil iam ch serviceAccount:lora-uploader@PROJECT_ID.iam.gserviceaccount.com:objectCreator \
+     gs://your-lora-models-bucket
+
+   # Generate JSON key
+   gcloud iam service-accounts keys create service-account-key.json \
+     --iam-account=lora-uploader@PROJECT_ID.iam.gserviceaccount.com
+   ```
+
+3. **Configure Environment Variables in RunPod Endpoint:**
+   - `GCS_BUCKET_NAME`: `your-lora-models-bucket`
+   - `GCP_SERVICE_ACCOUNT_JSON`: Base64-encoded service account JSON (recommended) or plain JSON
+
+**Encoding credentials to Base64 (recommended):**
+
+```bash
+# Encode service account JSON to base64
+cat service-account-key.json | base64
+```
+
+**Example Environment Variables:**
+
+```bash
+GCS_BUCKET_NAME=my-lora-models
+
+# Option 1: Base64-encoded (recommended - safer for environment variables)
+GCP_SERVICE_ACCOUNT_JSON=ewogICJ0eXBlIjogInNlcnZpY2VfYWNjb3VudCIsCiAgInByb2plY3RfaWQiOi...
+
+# Option 2: Plain JSON (may have issues with newlines in private key)
+GCP_SERVICE_ACCOUNT_JSON={"type":"service_account","project_id":"my-project",...}
+```
+
+**Note:** Base64 encoding is strongly recommended to avoid issues with special characters and newlines in the private key.
+
+**File Organization:**
+Uploaded files will be organized as:
+
+```
+gs://your-bucket/{job_id}/flux_lora.safetensors
+gs://your-bucket/{job_id}/training.log
+```
+
+**URL Format:**
+Signed URLs with 7-day expiration:
+
+```
+https://storage.googleapis.com/your-bucket/job-abc123/flux_lora.safetensors?X-Goog-Algorithm=...
+```
+
+### Option 2: RunPod Native S3 Storage (Default Fallback)
+
+**Benefits:**
+
+- Simple configuration (just 3 environment variables)
+- Works with any S3-compatible storage (AWS S3, Backblaze B2, DigitalOcean Spaces, etc.)
+- Built into RunPod SDK
+
+**Setup:**
+
+Configure these environment variables in your RunPod Endpoint:
+
+- `BUCKET_ENDPOINT_URL`: Your S3 endpoint URL (must include bucket name)
+  - Example (AWS): `https://your-bucket.s3.us-west-2.amazonaws.com`
+  - Example (Backblaze): `https://your-bucket.s3.us-west-004.backblazeb2.com`
+  - Example (DigitalOcean): `https://your-bucket.nyc3.digitaloceanspaces.com`
+- `BUCKET_ACCESS_KEY_ID`: Your S3 access key ID
+- `BUCKET_SECRET_ACCESS_KEY`: Your S3 secret access key
+
+**Example Environment Variables:**
+
+```bash
+BUCKET_ENDPOINT_URL=https://my-lora-models.s3.us-west-2.amazonaws.com
+BUCKET_ACCESS_KEY_ID=AKIAIOSFODNN7EXAMPLE
+BUCKET_SECRET_ACCESS_KEY=wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY
+```
+
+**File Organization:**
+Files are uploaded with job ID prefix:
+
+```
+your-bucket/{job_id}/flux_lora.safetensors
+your-bucket/{job_id}/training.log
+```
+
+**Documentation:** See [RunPod Environment Variables Guide](https://docs.runpod.io/serverless/development/environment-variables)
 
 ## Troubleshooting
 
