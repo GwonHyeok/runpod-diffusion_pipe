@@ -47,7 +47,7 @@ RUN pip install --no-cache-dir -r /workspace/serverless/requirements.txt
 WORKDIR /workspace/serverless
 
 # Create necessary directories
-RUN mkdir -p /runpod-volume/models \
+RUN mkdir -p /workspace/models \
     && mkdir -p /tmp/datasets \
     && mkdir -p /workspace/logs
 

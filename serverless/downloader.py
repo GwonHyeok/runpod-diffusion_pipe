@@ -177,9 +177,9 @@ class AssetDownloader:
 
 
 class ModelCacher:
-    """Manage model downloads and caching in /runpod-volume/models/"""
+    """Manage model downloads and caching in container local disk"""
 
-    def __init__(self, cache_dir: Path = Path("/runpod-volume/models")):
+    def __init__(self, cache_dir: Path = Path("/workspace/models")):
         self.cache_dir = Path(cache_dir)
         self.cache_dir.mkdir(parents=True, exist_ok=True)
 
