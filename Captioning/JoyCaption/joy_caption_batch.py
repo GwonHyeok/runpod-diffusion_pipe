@@ -19,14 +19,32 @@ import sys
 system_prompt = "Write a detailed description for this image in 50 words or less. Do NOT mention any text that is in the image."
 
 NETWORK_VOLUME = os.getenv("NETWORK_VOLUME")
+
+# Environment variable to control file handler usage
+USE_LOG_FILE = os.getenv("JOY_CAPTION_USE_LOG_FILE", "false").lower() == "true"
+
 # Configure logging
+handlers = [logging.StreamHandler(sys.stdout)]
+
+# Add file handler only if enabled via environment variable
+if USE_LOG_FILE:
+    if NETWORK_VOLUME:
+        log_dir = Path(f"{NETWORK_VOLUME}/logs")
+        log_dir.mkdir(parents=True, exist_ok=True)
+        log_file = log_dir / "joy_caption_batch.log"
+        handlers.append(logging.FileHandler(str(log_file)))
+        print(f"JoyCaption: Logging to file: {log_file}")
+    else:
+        print("JoyCaption: File logging enabled but NETWORK_VOLUME not set, skipping file handler")
+else:
+    print(
+        "JoyCaption: File logging disabled (set JOY_CAPTION_USE_LOG_FILE=true to enable)"
+    )
+
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler(f'{NETWORK_VOLUME}/logs/joy_caption_batch.log'),
-        logging.StreamHandler(sys.stdout)
-    ]
+    format="%(asctime)s - %(levelname)s - %(message)s",
+    handlers=handlers,
 )
 logger = logging.getLogger(__name__)
 

@@ -54,12 +54,18 @@ On the RunPod website:
 5. **Max Workers**: Number of concurrent jobs needed
 6. **Timeout**: 24 hours (for long training)
 7. **Network Volume**: Create and mount (`/runpod-volume`)
-8. **Environment Variables** (Optional - for GCP Storage):
+8. **Environment Variables** (Optional):
 
-   - `GCP_SERVICE_ACCOUNT_JSON`: Service account JSON credentials (as string)
+   **Storage Configuration:**
+   - `GCP_SERVICE_ACCOUNT_JSON`: Service account JSON credentials (Base64-encoded recommended)
    - `GCS_BUCKET_NAME`: GCS bucket name for storing trained models
+   - If these are not set, the system falls back to RunPod's native `rp_upload` utility
 
-   If these are not set, the system falls back to RunPod's native `rp_upload` utility.
+   **Logging Configuration:**
+   - `JOY_CAPTION_USE_LOG_FILE`: Enable file logging for JoyCaption (default: `false`)
+     - Set to `true`, `1`, or `yes` to enable logging to `${NETWORK_VOLUME}/logs/joy_caption_batch.log`
+     - Requires `NETWORK_VOLUME` environment variable to be set
+     - If not set or `false`, logs only to stdout (recommended for serverless)
 
 ### 3. API Call
 
