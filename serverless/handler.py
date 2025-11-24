@@ -16,19 +16,16 @@ from config import TrainingConfig
 from downloader import download_assets_and_models
 from caption_manager import CaptionManager
 from training_manager import TrainingManager
-from utils import (
-    validate_cuda,
-    upload_results,
-    setup_logging,
-    retry
-)
+from utils import validate_cuda, upload_results, setup_logging, retry
 
 # Setup logging
 setup_logging(level="INFO")
 logger = logging.getLogger(__name__)
 
 
-@retry(max_attempts=1, backoff=1.0)  # No retry at top level (handled by individual components)
+@retry(
+    max_attempts=1, backoff=1.0
+)  # No retry at top level (handled by individual components)
 async def handler(job: Dict[str, Any]) -> Dict[str, Any]:
     """
     Main RunPod Serverless async handler
@@ -39,6 +36,8 @@ async def handler(job: Dict[str, Any]) -> Dict[str, Any]:
             "model_type": "flux",
             "image_urls": ["https://...", ...],
             "video_urls": ["https://...", ...],
+            "image_caption_urls": ["https://...", ...],  # Optional: pre-made caption .txt files
+            "video_caption_urls": ["https://...", ...],  # Optional: pre-made caption .txt files
             "caption_mode": "images" | "videos" | "both" | "skip",
             "trigger_word": "alice",
             "caption_prompt": "custom prompt...",
@@ -67,7 +66,7 @@ async def handler(job: Dict[str, Any]) -> Dict[str, Any]:
     }
     """
     start_time = time.time()
-    job_id = job.get('id', 'unknown')
+    job_id = job.get("id", "unknown")
     workspace_dir = None
     workspace_cleanup_done = False  # Track if cleanup already happened
 
@@ -78,7 +77,7 @@ async def handler(job: Dict[str, Any]) -> Dict[str, Any]:
     try:
         # 1. Parse and validate configuration
         logger.info("Step 1: Parsing configuration...")
-        input_data = job.get('input', {})
+        input_data = job.get("input", {})
 
         try:
             config = TrainingConfig.from_request(input_data)
@@ -87,13 +86,15 @@ async def handler(job: Dict[str, Any]) -> Dict[str, Any]:
             return {
                 "status": "failed",
                 "error": f"Invalid configuration: {str(e)}",
-                "execution_time": time.time() - start_time
+                "execution_time": time.time() - start_time,
             }
 
         logger.info(f"Configuration validated:")
         logger.info(f"  Model: {config.model_type}")
         logger.info(f"  Images: {len(config.image_urls)}")
         logger.info(f"  Videos: {len(config.video_urls)}")
+        logger.info(f"  Image captions: {len(config.image_caption_urls)}")
+        logger.info(f"  Video captions: {len(config.video_caption_urls)}")
         logger.info(f"  Caption mode: {config.caption_mode}")
         logger.info(f"  Epochs: {config.training_params.get('epochs')}")
 
@@ -113,7 +114,9 @@ async def handler(job: Dict[str, Any]) -> Dict[str, Any]:
             video_urls=config.video_urls,
             model_type=config.model_type,
             hf_token=config.hf_token,
-            workspace_dir=workspace_dir
+            workspace_dir=workspace_dir,
+            image_caption_urls=config.image_caption_urls,
+            video_caption_urls=config.video_caption_urls,
         )
 
         logger.info(f"Downloads complete:")
@@ -122,31 +125,46 @@ async def handler(job: Dict[str, Any]) -> Dict[str, Any]:
 
         # 5. Run captioning (if needed)
         caption_results = {}
-        if config.caption_mode != "skip":
+        if config.needs_image_captioning() or config.needs_video_captioning():
             logger.info("Step 4: Running captioning...")
 
             caption_manager = CaptionManager(
                 trigger_word=config.trigger_word,
                 caption_prompt=config.caption_prompt,
-                gemini_api_key=config.gemini_api_key
+                gemini_api_key=config.gemini_api_key,
             )
 
-            image_dir = dataset_path / "image_dataset_here" if config.has_images() else None
-            video_dir = dataset_path / "video_dataset_here" if config.has_videos() else None
+            # Only caption directories that need it (no provided caption URLs)
+            image_dir = None
+            video_dir = None
+
+            if config.needs_image_captioning():
+                image_dir = dataset_path / "image_dataset_here"
+
+            if config.needs_video_captioning():
+                video_dir = dataset_path / "video_dataset_here"
 
             caption_results = await caption_manager.run(
-                image_dir=image_dir,
-                video_dir=video_dir
+                image_dir=image_dir, video_dir=video_dir
             )
 
             logger.info(f"Captioning complete:")
-            logger.info(f"  Images captioned: {caption_results.get('images_captioned', 0)}")
-            logger.info(f"  Videos captioned: {caption_results.get('videos_captioned', 0)}")
+            logger.info(
+                f"  Images captioned: {caption_results.get('images_captioned', 0)}"
+            )
+            logger.info(
+                f"  Videos captioned: {caption_results.get('videos_captioned', 0)}"
+            )
 
-            if caption_results.get('errors'):
+            if caption_results.get("errors"):
                 logger.warning(f"  Captioning errors: {len(caption_results['errors'])}")
         else:
-            logger.info("Step 4: Skipping captioning (mode='skip')")
+            skip_reason = (
+                "caption files provided"
+                if (config.has_image_captions() or config.has_video_captions())
+                else "mode='skip'"
+            )
+            logger.info(f"Step 4: Skipping captioning ({skip_reason})")
 
         # 6. Setup and run training
         logger.info("Step 5: Setting up training...")
@@ -156,7 +174,7 @@ async def handler(job: Dict[str, Any]) -> Dict[str, Any]:
             model_type=config.model_type,
             dataset_path=dataset_path,
             training_params=config.training_params,
-            workspace_dir=workspace_dir
+            workspace_dir=workspace_dir,
         )
 
         logger.info("Step 6: Running training...")
@@ -177,7 +195,7 @@ async def handler(job: Dict[str, Any]) -> Dict[str, Any]:
         upload_urls = await upload_results(
             output_dir=output_dir,
             job_id=job_id,
-            file_patterns=["**/*.safetensors", "**/*.log"]
+            file_patterns=["**/*.safetensors", "**/*.log"],
         )
 
         logger.info(f"Upload complete: {len(upload_urls)} files uploaded")
@@ -188,7 +206,9 @@ async def handler(job: Dict[str, Any]) -> Dict[str, Any]:
         # Success response
         logger.info("=" * 80)
         logger.info(f"JOB COMPLETED SUCCESSFULLY: {job_id}")
-        logger.info(f"Total execution time: {execution_time:.1f}s ({execution_time/60:.1f} minutes)")
+        logger.info(
+            f"Total execution time: {execution_time:.1f}s ({execution_time/60:.1f} minutes)"
+        )
         logger.info("=" * 80)
 
         # Mark workspace for cleanup (set flag to skip cleanup in finally)
@@ -203,9 +223,9 @@ async def handler(job: Dict[str, Any]) -> Dict[str, Any]:
                 "files": output_files,
                 "caption_results": caption_results,
                 "model_type": config.model_type,
-                "epochs_completed": metrics.get('epochs_completed', 0)
+                "epochs_completed": metrics.get("epochs_completed", 0),
             },
-            "execution_time": execution_time
+            "execution_time": execution_time,
         }
 
     except Exception as e:
@@ -223,7 +243,7 @@ async def handler(job: Dict[str, Any]) -> Dict[str, Any]:
             "status": "failed",
             "error": str(e),
             "traceback": error_trace,
-            "execution_time": execution_time
+            "execution_time": execution_time,
         }
 
     finally:
@@ -238,6 +258,7 @@ async def handler(job: Dict[str, Any]) -> Dict[str, Any]:
         # Free GPU memory
         try:
             import torch
+
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
                 logger.info("GPU memory cleared")
@@ -250,6 +271,4 @@ if __name__ == "__main__":
     logger.info("Starting RunPod Serverless LoRA Training Handler")
     logger.info("Ready to accept jobs...")
 
-    runpod.serverless.start({
-        "handler": handler
-    })
+    runpod.serverless.start({"handler": handler})

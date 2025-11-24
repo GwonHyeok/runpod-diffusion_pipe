@@ -7,9 +7,8 @@ import asyncio
 import aiohttp
 import logging
 from pathlib import Path
-from typing import List, Optional, Dict, Tuple
+from typing import List, Optional, Tuple
 from urllib.parse import urlparse
-import mimetypes
 
 from config import MODEL_CONFIGS
 from utils import retry, run_subprocess
@@ -17,8 +16,9 @@ from utils import retry, run_subprocess
 logger = logging.getLogger(__name__)
 
 # Supported file extensions
-IMAGE_EXTENSIONS = {'.jpg', '.jpeg', '.png', '.bmp', '.gif', '.tiff', '.webp'}
-VIDEO_EXTENSIONS = {'.mp4', '.avi', '.mov', '.mkv', '.webm'}
+IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".bmp", ".gif", ".tiff", ".webp"}
+VIDEO_EXTENSIONS = {".mp4", ".avi", ".mov", ".mkv", ".webm"}
+CAPTION_EXTENSION = ".txt"
 
 # Download limits
 MAX_FILE_SIZE = 500 * 1024 * 1024  # 500MB per file
@@ -36,7 +36,9 @@ class AssetDownloader:
     async def download_batch(
         self,
         image_urls: List[str],
-        video_urls: List[str]
+        video_urls: List[str],
+        image_caption_urls: List[str] = None,
+        video_caption_urls: List[str] = None,
     ) -> Path:
         """
         Download all assets concurrently
@@ -44,11 +46,19 @@ class AssetDownloader:
         Args:
             image_urls: List of image URLs
             video_urls: List of video URLs
+            image_caption_urls: List of caption .txt file URLs for images (optional)
+            video_caption_urls: List of caption .txt file URLs for videos (optional)
 
         Returns:
             Path to dataset directory containing image_dataset_here and video_dataset_here
         """
-        logger.info(f"Starting batch download: {len(image_urls)} images, {len(video_urls)} videos")
+        image_caption_urls = image_caption_urls or []
+        video_caption_urls = video_caption_urls or []
+
+        logger.info(
+            f"Starting batch download: {len(image_urls)} images, {len(video_urls)} videos, "
+            f"{len(image_caption_urls)} image captions, {len(video_caption_urls)} video captions"
+        )
 
         # Create directories
         if image_urls:
@@ -61,17 +71,29 @@ class AssetDownloader:
 
         # Queue image downloads
         for i, url in enumerate(image_urls):
-            ext = self._get_extension_from_url(url, default='.jpg')
+            ext = self._get_extension_from_url(url, default=".jpg")
             filename = f"image_{i:04d}{ext}"
             dest_path = self.image_dir / filename
             tasks.append(self._download_file(url, dest_path, "image"))
 
         # Queue video downloads
         for i, url in enumerate(video_urls):
-            ext = self._get_extension_from_url(url, default='.mp4')
+            ext = self._get_extension_from_url(url, default=".mp4")
             filename = f"video_{i:04d}{ext}"
             dest_path = self.video_dir / filename
             tasks.append(self._download_file(url, dest_path, "video"))
+
+        # Queue image caption downloads
+        for i, url in enumerate(image_caption_urls):
+            filename = f"image_{i:04d}.txt"
+            dest_path = self.image_dir / filename
+            tasks.append(self._download_file(url, dest_path, "caption"))
+
+        # Queue video caption downloads
+        for i, url in enumerate(video_caption_urls):
+            filename = f"video_{i:04d}.txt"
+            dest_path = self.video_dir / filename
+            tasks.append(self._download_file(url, dest_path, "caption"))
 
         # Execute all downloads
         results = await asyncio.gather(*tasks, return_exceptions=True)
@@ -92,10 +114,7 @@ class AssetDownloader:
 
     @retry(max_attempts=3, backoff=2.0)
     async def _download_file(
-        self,
-        url: str,
-        dest_path: Path,
-        file_type: str = "file"
+        self, url: str, dest_path: Path, file_type: str = "file"
     ) -> bool:
         """
         Download a single file with retry logic
@@ -121,7 +140,7 @@ class AssetDownloader:
                 response.raise_for_status()
 
                 # Validate content length
-                content_length = int(response.headers.get('content-length', 0))
+                content_length = int(response.headers.get("content-length", 0))
                 if content_length > MAX_FILE_SIZE:
                     raise ValueError(
                         f"File too large: {content_length / 1024**2:.1f} MB "
@@ -129,29 +148,37 @@ class AssetDownloader:
                     )
 
                 # Validate content type
-                content_type = response.headers.get('content-type', '').lower()
-                if file_type == "image" and not content_type.startswith('image/'):
+                content_type = response.headers.get("content-type", "").lower()
+                if file_type == "image" and not content_type.startswith("image/"):
                     logger.warning(f"Unexpected content-type for image: {content_type}")
-                elif file_type == "video" and not content_type.startswith('video/'):
+                elif file_type == "video" and not content_type.startswith("video/"):
                     logger.warning(f"Unexpected content-type for video: {content_type}")
+                elif file_type == "caption" and not content_type.startswith(
+                    ("text/", "application/octet-stream")
+                ):
+                    logger.warning(
+                        f"Unexpected content-type for caption: {content_type}"
+                    )
 
                 # Download file
                 downloaded_size = 0
-                with open(dest_path, 'wb') as f:
+                with open(dest_path, "wb") as f:
                     async for chunk in response.content.iter_chunked(8192):
                         f.write(chunk)
                         downloaded_size += len(chunk)
 
                         # Safety check
                         if downloaded_size > MAX_FILE_SIZE:
-                            raise ValueError(f"Download exceeded max size: {MAX_FILE_SIZE}")
+                            raise ValueError(
+                                f"Download exceeded max size: {MAX_FILE_SIZE}"
+                            )
 
                 file_size_mb = downloaded_size / 1024**2
                 logger.info(f"Downloaded {dest_path.name} ({file_size_mb:.1f} MB)")
 
                 return True
 
-    def _get_extension_from_url(self, url: str, default: str = '') -> str:
+    def _get_extension_from_url(self, url: str, default: str = "") -> str:
         """
         Extract file extension from URL
 
@@ -164,7 +191,7 @@ class AssetDownloader:
         """
         parsed = urlparse(url)
         # Extract just the filename, not the full path (security: prevent path traversal)
-        filename = parsed.path.split('/')[-1] if parsed.path else ''
+        filename = parsed.path.split("/")[-1] if parsed.path else ""
         if not filename:
             return default
 
@@ -185,9 +212,7 @@ class ModelCacher:
 
     @retry(max_attempts=3, backoff=5.0)
     async def get_or_download(
-        self,
-        model_type: str,
-        hf_token: Optional[str] = None
+        self, model_type: str, hf_token: Optional[str] = None
     ) -> Path:
         """
         Check if model exists in cache, download if missing
@@ -220,7 +245,7 @@ class ModelCacher:
             repo_id=model_config["repo"],
             local_dir=model_path,
             hf_token=hf_token,
-            model_type=model_type
+            model_type=model_type,
         )
 
         # Verify download
@@ -247,7 +272,9 @@ class ModelCacher:
         # For single file models (e.g., SDXL checkpoint)
         if model_path.is_file():
             size_mb = model_path.stat().st_size / 1024**2
-            logger.info(f"Found cached model file: {model_path.name} ({size_mb:.1f} MB)")
+            logger.info(
+                f"Found cached model file: {model_path.name} ({size_mb:.1f} MB)"
+            )
             return size_mb > 100  # Should be at least 100MB
 
         # For directory-based models (e.g., Flux, Wan)
@@ -263,7 +290,9 @@ class ModelCacher:
                 return total_size > 100  # Should be at least 100MB
 
             # Check for other model files
-            model_files = list(model_path.glob("**/*.bin")) + list(model_path.glob("**/*.pth"))
+            model_files = list(model_path.glob("**/*.bin")) + list(
+                model_path.glob("**/*.pth")
+            )
             if model_files:
                 logger.info(f"Found cached model: {len(model_files)} files")
                 return True
@@ -271,11 +300,7 @@ class ModelCacher:
         return False
 
     async def _download_model(
-        self,
-        repo_id: str,
-        local_dir: Path,
-        hf_token: Optional[str],
-        model_type: str
+        self, repo_id: str, local_dir: Path, hf_token: Optional[str], model_type: str
     ):
         """
         Download model from Hugging Face Hub
@@ -306,16 +331,14 @@ class ModelCacher:
         # Download (this may take a long time)
         try:
             await run_subprocess(
-                cmd,
-                env=env,
-                timeout=3600,  # 1 hour timeout
-                log_output=True
+                cmd, env=env, timeout=3600, log_output=True  # 1 hour timeout
             )
         except Exception as e:
             logger.error(f"Model download failed: {e}")
             # Clean up partial download
             if local_dir.exists():
                 import shutil
+
                 shutil.rmtree(local_dir, ignore_errors=True)
             raise RuntimeError(f"Failed to download model {repo_id}: {e}")
 
@@ -326,7 +349,9 @@ async def download_assets_and_models(
     video_urls: List[str],
     model_type: str,
     hf_token: Optional[str],
-    workspace_dir: Path
+    workspace_dir: Path,
+    image_caption_urls: List[str] = None,
+    video_caption_urls: List[str] = None,
 ) -> Tuple[Path, Path]:
     """
     Download both assets and models concurrently
@@ -337,6 +362,8 @@ async def download_assets_and_models(
         model_type: Model type to download
         hf_token: Hugging Face token
         workspace_dir: Workspace directory for assets
+        image_caption_urls: List of caption .txt file URLs for images (optional)
+        video_caption_urls: List of caption .txt file URLs for videos (optional)
 
     Returns:
         Tuple of (model_path, dataset_path)
@@ -350,7 +377,9 @@ async def download_assets_and_models(
     # Download concurrently
     model_path, dataset_path = await asyncio.gather(
         model_cacher.get_or_download(model_type, hf_token),
-        asset_downloader.download_batch(image_urls, video_urls)
+        asset_downloader.download_batch(
+            image_urls, video_urls, image_caption_urls, video_caption_urls
+        ),
     )
 
     logger.info(f"Downloads complete - Model: {model_path}, Dataset: {dataset_path}")

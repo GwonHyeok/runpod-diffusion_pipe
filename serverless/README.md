@@ -57,11 +57,13 @@ On the RunPod website:
 8. **Environment Variables** (Optional):
 
    **Storage Configuration:**
+
    - `GCP_SERVICE_ACCOUNT_JSON`: Service account JSON credentials (Base64-encoded recommended)
    - `GCS_BUCKET_NAME`: GCS bucket name for storing trained models
    - If these are not set, the system falls back to RunPod's native `rp_upload` utility
 
    **Logging Configuration:**
+
    - `JOY_CAPTION_USE_LOG_FILE`: Enable file logging for JoyCaption (default: `false`)
      - Set to `true`, `1`, or `yes` to enable logging to `${NETWORK_VOLUME}/logs/joy_caption_batch.log`
      - Requires `NETWORK_VOLUME` environment variable to be set
@@ -113,6 +115,9 @@ print(result["output"]["download_urls"])
     "image_urls": ["https://...", "https://..."],
     "video_urls": ["https://...", "https://..."],
 
+    "image_caption_urls": ["https://...", "https://..."],
+    "video_caption_urls": ["https://...", "https://..."],
+
     "caption_mode": "images | videos | both | skip",
     "trigger_word": "optional_trigger_word",
     "caption_prompt": "Custom caption prompt...",
@@ -152,9 +157,43 @@ print(result["output"]["download_urls"])
 
 ### Optional Fields
 
+- `image_caption_urls`: Pre-made caption `.txt` files for images (skips auto-captioning)
+- `video_caption_urls`: Pre-made caption `.txt` files for videos (skips auto-captioning)
 - `caption_mode`: Default `"skip"`
 - `trigger_word`: Word to prepend to image captions
 - `training_params`: Filled with defaults (can override partially)
+
+### Using Pre-made Caption Files
+
+Instead of auto-generating captions, you can provide your own `.txt` caption files:
+
+**Example:**
+
+```json
+{
+  "input": {
+    "model_type": "flux",
+    "image_urls": [
+      "https://example.com/photo1.jpg",
+      "https://example.com/photo2.jpg"
+    ],
+    "image_caption_urls": [
+      "https://example.com/caption1.txt",
+      "https://example.com/caption2.txt"
+    ],
+    "caption_mode": "skip",
+    "hf_token": "hf_xxxxx"
+  }
+}
+```
+
+**Important Notes:**
+
+- Caption file order must match image/video URL order (first caption → first image, etc.)
+- Caption files are automatically named as `image_0000.txt`, `image_0001.txt`, etc.
+- When caption URLs are provided, automatic captioning is skipped for that dataset
+- Each `.txt` file should contain plain text description
+- You can mix: provide captions for images and auto-generate for videos (or vice versa)
 
 ## Output Schema
 
