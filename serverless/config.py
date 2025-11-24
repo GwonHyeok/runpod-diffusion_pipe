@@ -53,30 +53,6 @@ MODEL_CONFIGS = {
     },
 }
 
-# Default training parameters
-DEFAULT_TRAINING_PARAMS = {
-    "epochs": 80,
-    "micro_batch_size_per_gpu": 1,
-    "gradient_accumulation_steps": 4,
-    "save_every_n_epochs": 10,
-    "checkpoint_every_n_minutes": 120,
-    "warmup_steps": 100,
-    "gradient_clipping": 1.0,
-    "activation_checkpointing": True,
-    "lr": 2e-4,
-    "rank": 32,
-    "optimizer_type": "adamw_optimi",
-    "weight_decay": 0.01,
-    "betas": [0.9, 0.99],
-    "eps": 1e-8,
-    "resolution": 1024,
-    "enable_ar_bucket": True,
-    "min_ar": 0.5,
-    "max_ar": 2.0,
-    "num_ar_buckets": 7,
-    "num_repeats": 1,
-}
-
 
 @dataclass
 class TrainingConfig:
@@ -104,7 +80,7 @@ class TrainingConfig:
     hf_token: Optional[str] = None
     gemini_api_key: Optional[str] = None
 
-    # Training parameters (merged with defaults)
+    # Training parameters (from base TOML files)
     training_params: Dict[str, Any] = field(default_factory=dict)
 
     # Output configuration
@@ -113,7 +89,6 @@ class TrainingConfig:
     def __post_init__(self):
         """Validate configuration after initialization"""
         self._validate()
-        self._merge_defaults()
 
     def _validate(self):
         """Validate configuration constraints"""
@@ -171,17 +146,6 @@ class TrainingConfig:
             f"Configuration validated: model={self.model_type}, "
             f"images={len(self.image_urls)}, videos={len(self.video_urls)}, "
             f"caption_mode={self.caption_mode}"
-        )
-
-    def _merge_defaults(self):
-        """Merge user params with defaults"""
-        merged = DEFAULT_TRAINING_PARAMS.copy()
-        merged.update(self.training_params)
-        self.training_params = merged
-
-        logger.info(
-            f"Training params: epochs={self.training_params['epochs']}, "
-            f"lr={self.training_params['lr']}, rank={self.training_params['rank']}"
         )
 
     @classmethod
@@ -249,4 +213,4 @@ class TrainingConfig:
 
 
 # Export for easy imports
-__all__ = ["TrainingConfig", "MODEL_CONFIGS", "DEFAULT_TRAINING_PARAMS"]
+__all__ = ["TrainingConfig", "MODEL_CONFIGS"]

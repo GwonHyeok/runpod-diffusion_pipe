@@ -3,12 +3,10 @@ Training manager for RunPod Serverless LoRA Training
 Handles TOML configuration generation and training execution
 """
 
-import asyncio
 import logging
 import toml
-import shutil
 from pathlib import Path
-from typing import Dict, Any, Optional
+from typing import Dict, Any
 
 from config import MODEL_CONFIGS
 from utils import run_subprocess, parse_training_metrics
@@ -25,7 +23,7 @@ class TrainingManager:
         model_type: str,
         dataset_path: Path,
         training_params: Dict[str, Any],
-        workspace_dir: Path
+        workspace_dir: Path,
     ):
         self.model_path = Path(model_path)
         self.model_type = model_type
@@ -79,11 +77,17 @@ class TrainingManager:
             Path to generated TOML file
         """
         # Load base TOML template
-        base_toml_path = Path("/workspace") / "toml_files" / self.model_config["toml_file"]
+        base_toml_path = (
+            Path("/workspace") / "toml_files" / self.model_config["toml_file"]
+        )
 
         if not base_toml_path.exists():
             # Fallback to repository location
-            base_toml_path = Path(__file__).parent.parent / "toml_files" / self.model_config["toml_file"]
+            base_toml_path = (
+                Path(__file__).parent.parent
+                / "toml_files"
+                / self.model_config["toml_file"]
+            )
 
         if not base_toml_path.exists():
             raise FileNotFoundError(
@@ -96,30 +100,43 @@ class TrainingManager:
 
         logger.info(f"Loading base TOML: {base_toml_path}")
 
-        with open(base_toml_path, 'r') as f:
+        with open(base_toml_path, "r") as f:
             config = toml.load(f)
 
         # Update output directory
-        config['output_dir'] = str(self.output_dir / f"{self.model_type}_lora")
+        config["output_dir"] = str(self.output_dir / f"{self.model_type}_lora")
 
         # Update dataset path
         dataset_toml_path = self.config_dir / "dataset.toml"
-        config['dataset'] = str(dataset_toml_path)
+        config["dataset"] = str(dataset_toml_path)
 
         # Update model paths
-        if 'model' in config:
-            if 'diffusers_path' in config['model']:
-                config['model']['diffusers_path'] = str(self.model_path)
-            elif 'checkpoint_path' in config['model']:
-                config['model']['checkpoint_path'] = str(self.model_path)
-            elif 'ckpt_path' in config['model']:
-                config['model']['ckpt_path'] = str(self.model_path)
+        if "model" in config:
+            if "diffusers_path" in config["model"]:
+                config["model"]["diffusers_path"] = str(self.model_path)
+            elif "checkpoint_path" in config["model"]:
+                config["model"]["checkpoint_path"] = str(self.model_path)
+            elif "ckpt_path" in config["model"]:
+                config["model"]["ckpt_path"] = str(self.model_path)
 
-        # Apply custom training parameter overrides
+        # Apply training_params overrides to model TOML
+        # These override the base TOML values if provided by user
         for key, value in self.training_params.items():
-            if '.' in key:
+            # Skip dataset-specific params (handled in dataset.toml)
+            if key in [
+                "num_repeats",
+                "video_num_repeats",
+                "resolution",
+                "enable_ar_bucket",
+                "min_ar",
+                "max_ar",
+                "num_ar_buckets",
+            ]:
+                continue
+
+            if "." in key:
                 # Handle nested keys like "optimizer.lr"
-                parts = key.split('.')
+                parts = key.split(".")
                 current = config
                 for part in parts[:-1]:
                     if part not in current:
@@ -132,7 +149,7 @@ class TrainingManager:
 
         # Save to config directory
         output_path = self.config_dir / self.model_config["toml_file"]
-        with open(output_path, 'w') as f:
+        with open(output_path, "w") as f:
             toml.dump(config, f)
 
         logger.info(f"Model TOML configured with:")
@@ -157,24 +174,45 @@ class TrainingManager:
         if not base_dataset_toml.exists():
             base_dataset_toml = Path(__file__).parent.parent / "dataset.toml"
 
-        with open(base_dataset_toml, 'r') as f:
+        with open(base_dataset_toml, "r") as f:
             dataset_config = toml.load(f)
 
-        # Update resolution and other dataset params from training_params
-        if 'resolution' in self.training_params:
-            dataset_config['resolutions'] = [self.training_params['resolution']]
+        # Apply dataset-specific training_params overrides
+        if "resolution" in self.training_params:
+            dataset_config["resolutions"] = [self.training_params["resolution"]]
 
-        if 'enable_ar_bucket' in self.training_params:
-            dataset_config['enable_ar_bucket'] = self.training_params['enable_ar_bucket']
+        if "enable_ar_bucket" in self.training_params:
+            dataset_config["enable_ar_bucket"] = self.training_params[
+                "enable_ar_bucket"
+            ]
 
-        if 'min_ar' in self.training_params:
-            dataset_config['min_ar'] = self.training_params['min_ar']
+        if "min_ar" in self.training_params:
+            dataset_config["min_ar"] = self.training_params["min_ar"]
 
-        if 'max_ar' in self.training_params:
-            dataset_config['max_ar'] = self.training_params['max_ar']
+        if "max_ar" in self.training_params:
+            dataset_config["max_ar"] = self.training_params["max_ar"]
 
-        if 'num_ar_buckets' in self.training_params:
-            dataset_config['num_ar_buckets'] = self.training_params['num_ar_buckets']
+        if "num_ar_buckets" in self.training_params:
+            dataset_config["num_ar_buckets"] = self.training_params["num_ar_buckets"]
+
+        # Extract default num_repeats from base TOML
+        base_directories = dataset_config.get("directory", [])
+        default_image_repeats = 1
+        default_video_repeats = 5
+
+        # Try to find defaults in base TOML
+        for base_dir in base_directories:
+            base_path = base_dir.get("path", "")
+            if "image_dataset_here" in base_path:
+                default_image_repeats = base_dir.get("num_repeats", 1)
+            elif "video_dataset_here" in base_path:
+                default_video_repeats = base_dir.get("num_repeats", 5)
+
+        # Get user-provided num_repeats or use defaults
+        image_repeats = self.training_params.get("num_repeats", default_image_repeats)
+        video_repeats = self.training_params.get(
+            "video_num_repeats", default_video_repeats
+        )
 
         # Configure directories
         image_dir = self.dataset_path / "image_dataset_here"
@@ -185,28 +223,22 @@ class TrainingManager:
 
         # Add image directory if exists
         if image_dir.exists() and any(image_dir.iterdir()):
-            directories.append({
-                'path': str(image_dir),
-                'num_repeats': self.training_params.get('num_repeats', 1)
-            })
-            logger.info(f"Added image dataset: {image_dir}")
+            directories.append({"path": str(image_dir), "num_repeats": image_repeats})
+            logger.info(f"Added image dataset: {image_dir} (repeats={image_repeats})")
 
         # Add video directory if exists
         if video_dir.exists() and any(video_dir.iterdir()):
-            directories.append({
-                'path': str(video_dir),
-                'num_repeats': self.training_params.get('num_repeats', 5)  # Videos repeat more
-            })
-            logger.info(f"Added video dataset: {video_dir}")
+            directories.append({"path": str(video_dir), "num_repeats": video_repeats})
+            logger.info(f"Added video dataset: {video_dir} (repeats={video_repeats})")
 
         if not directories:
             raise ValueError("No dataset directories found with files")
 
-        dataset_config['directory'] = directories
+        dataset_config["directory"] = directories
 
         # Save dataset.toml
         output_path = self.config_dir / "dataset.toml"
-        with open(output_path, 'w') as f:
+        with open(output_path, "w") as f:
             toml.dump(dataset_config, f)
 
         logger.info(f"Dataset TOML configured with {len(directories)} directories")
@@ -277,16 +309,14 @@ class TrainingManager:
         try:
             # Update transformers
             await run_subprocess(
-                ["pip", "install", "transformers", "-U"],
-                timeout=300,
-                log_output=False
+                ["pip", "install", "transformers", "-U"], timeout=300, log_output=False
             )
 
             # Update peft
             await run_subprocess(
                 ["pip", "install", "--upgrade", "peft>=0.17.0"],
                 timeout=300,
-                log_output=False
+                log_output=False,
             )
 
             logger.info("Dependencies updated successfully")
@@ -316,7 +346,8 @@ class TrainingManager:
             "--num_gpus=1",
             "train.py",
             "--deepspeed",
-            "--config", str(config_path)
+            "--config",
+            str(config_path),
         ]
 
         # Set environment variables
@@ -331,7 +362,7 @@ class TrainingManager:
             env=env,
             cwd=self.diffusion_pipe_dir,
             timeout=None,  # No timeout for training (can take hours)
-            log_output=True
+            log_output=True,
         )
 
         return result
@@ -347,8 +378,7 @@ class TrainingManager:
             return []
 
         return [
-            str(f.relative_to(output_dir))
-            for f in output_dir.glob("**/*.safetensors")
+            str(f.relative_to(output_dir)) for f in output_dir.glob("**/*.safetensors")
         ]
 
 
